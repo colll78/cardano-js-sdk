@@ -1,7 +1,8 @@
 import { AccountAddressDerivationPath, AddressType, Bip32Account, GroupedAddress } from '@cardano-sdk/key-management';
 import { AddressDiscovery } from '../types';
-import { ChainHistoryProvider } from '@cardano-sdk/core';
+import { Cardano, ChainHistoryProvider, Serialization } from '@cardano-sdk/core';
 import uniqBy from 'lodash/uniqBy.js';
+import { HexBlob } from '@cardano-sdk/util';
 
 const STAKE_KEY_INDEX_LOOKAHEAD = 5;
 
@@ -148,11 +149,83 @@ export class HDSequentialDiscovery implements AddressDiscovery {
     );
 
     const addresses = uniqBy([...firstAddresses, ...stakeKeyAddresses, ...paymentKeyAddresses], 'address');
+    
+    const lastIdx = addresses[addresses.length - 1].index;
+    const progTokenAddresses = addresses.map((address, idx) => {
+      const groupedAddress = {
+        ...address,
+        index: lastIdx + idx + 1,
+        address: makeProgrammableTokenAddress(address.address, address.networkId)
+      }
+      return groupedAddress;
+    });
 
     // We need to make sure the addresses are sorted since the wallet assumes that the first address
     // in the list is the change address (payment cred 0 and stake cred 0).
-    return addresses.sort(
+    return addresses.concat(progTokenAddresses).sort(
       (a, b) => a.index - b.index || a.stakeKeyDerivationPath!.index - b.stakeKeyDerivationPath!.index
     );
   }
 }
+
+const getPaymentCredential = (userAddress: Cardano.Address): Cardano.Credential => {
+  switch (userAddress.getType()) {
+    case Cardano.AddressType.EnterpriseKey:
+    case Cardano.AddressType.EnterpriseScript: 
+      return userAddress.asEnterprise()!.getPaymentCredential();
+    case Cardano.AddressType.BasePaymentKeyStakeKey:
+    case Cardano.AddressType.BasePaymentKeyStakeScript:
+    case Cardano.AddressType.BasePaymentScriptStakeScript:
+    case Cardano.AddressType.BasePaymentScriptStakeKey:
+      return userAddress.asBase()!.getPaymentCredential();
+    default:
+      throw new Error('Unsupported address type');
+  }
+};
+
+// export interface GroupedAddress {
+//   type: AddressType;
+//   index: number;
+//   networkId: Cardano.NetworkId;
+//   accountIndex: number;
+//   address: Cardano.PaymentAddress;
+//   rewardAccount: Cardano.RewardAccount;
+//   stakeKeyDerivationPath?: AccountKeyDerivationPath;
+// }
+// export const knownAddress: GroupedAddress = {
+//   accountIndex: 0,
+//   address: paymentAddress,
+//   index: 0,
+//   networkId: Cardano.NetworkId.Testnet,
+//   rewardAccount,
+//   stakeKeyDerivationPath,
+//   type: AddressType.Internal
+// };
+
+const makeProgrammableTokenAddress = (userAddress: Cardano.PaymentAddress, networkId: Cardano.NetworkId): Cardano.PaymentAddress => {
+  const paymentCredential = getPaymentCredential(Cardano.Address.fromString(userAddress)!);
+
+  // From https://github.com/input-output-hk/wsc-poc/blob/main/compiled-prod/programmableLogicBase.json
+  // Cardano JS SDK currently does not support applying parameters to scripts yet, so we would need to use something like
+  // https://www.npmjs.com/package/@lucid-evolution/uplc
+  const programmableLogicBase: Cardano.PlutusScript = {
+    __type: Cardano.ScriptType.Plutus,
+    bytes: HexBlob(
+      '58845882010000223253335734a666ae68cdd79aab9d3574200200629444cc8c8c8c0088cc0080080048c0088cc008008004894ccd55cf8008b0a999ab9a30033574200229444c008d5d1000919baf35573a0020086ae88004526163756646ae84c8d5d11aba2357446ae88d5d11aba20013235573c6ea8004004d5d0991aab9e37540020021'
+    ),
+    version: Cardano.PlutusLanguageVersion.V3
+  };
+
+  const scriptHash = Serialization.Script.fromCore(programmableLogicBase).hash();
+
+  return Cardano.BaseAddress.fromCredentials(
+    networkId,
+    {
+      hash: scriptHash,
+      type: Cardano.CredentialType.ScriptHash
+    },
+    paymentCredential
+  )
+    .toAddress()
+    .toBech32() as Cardano.PaymentAddress;
+};

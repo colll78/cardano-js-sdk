@@ -126,7 +126,8 @@ export interface BaseWalletProps {
 
 export enum PublicCredentialsManagerType {
   SCRIPT_CREDENTIALS_MANAGER = 'SCRIPT_CREDENTIALS_MANAGER',
-  BIP32_CREDENTIALS_MANAGER = 'BIP32_CREDENTIALS_MANAGER'
+  BIP32_CREDENTIALS_MANAGER = 'BIP32_CREDENTIALS_MANAGER',
+  PROGRAMMABLE_CREDENTIALS_MANAGER = 'PROGRAMMABLE_CREDENTIALS_MANAGER'
 }
 
 export interface Bip32PublicCredentialsManager {
@@ -141,7 +142,13 @@ export interface ScriptPublicCredentialsManager {
   stakingScript: Cardano.RequireAllOfScript | Cardano.RequireAnyOfScript | Cardano.RequireAtLeastScript;
 }
 
-export type PublicCredentialsManager = ScriptPublicCredentialsManager | Bip32PublicCredentialsManager;
+export interface ProgrammablePublicCredentialsManager {
+  __type: PublicCredentialsManagerType.PROGRAMMABLE_CREDENTIALS_MANAGER;
+  bip32Account: Bip32Account;
+  addressDiscovery: AddressDiscovery;
+}
+
+export type PublicCredentialsManager = ScriptPublicCredentialsManager | Bip32PublicCredentialsManager | ProgrammablePublicCredentialsManager;
 
 export const isScriptPublicCredentialsManager = (
   credManager: PublicCredentialsManager
@@ -150,7 +157,12 @@ export const isScriptPublicCredentialsManager = (
 
 export const isBip32PublicCredentialsManager = (
   credManager: PublicCredentialsManager
-): credManager is Bip32PublicCredentialsManager => !isScriptPublicCredentialsManager(credManager);
+): credManager is Bip32PublicCredentialsManager => credManager.__type === PublicCredentialsManagerType.BIP32_CREDENTIALS_MANAGER;
+
+
+export const isProgrammablePublicCredentialsManager = (
+  credManager: PublicCredentialsManager
+): credManager is ProgrammablePublicCredentialsManager => credManager.__type === PublicCredentialsManagerType.PROGRAMMABLE_CREDENTIALS_MANAGER;
 
 /**
  * Gets whether the given address has a transaction history.
